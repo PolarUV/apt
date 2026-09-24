@@ -1,0 +1,78 @@
+name: Build and deploy apt repository
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pool/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev apt-utils gnupg
+
+      - name: Generate Packages indices
+        run: |
+          set -euo pipefail
+          rm -rf public dists
+          mkdir -p public
+          cp -r pool public/pool
+          touch public/.nojekyll
+
+          for distro_dir in pool/*/; do
+            distro=$(basename "$distro_dir")
+            for arch in amd64 arm64; do
+              dir="public/dists/$distro/main/binary-$arch"
+              mkdir -p "$dir"
+              # пути в Packages указываются относительно public/
+              (cd public && dpkg-scanpackages --arch "$arch" "pool/$distro" /dev/null \
+                 > "dists/$distro/main/binary-$arch/Packages")
+              gzip -9kf "public/dists/$distro/main/binary-$arch/Packages"
+            done
+
+            # Release для дистрибутива
+            (
+              cd "public/dists/$distro"
+              apt-ftparchive \
+                -o APT::FTPArchive::Release::Origin="PolarUV" \
+                -o APT::FTPArchive::Release::Label="PolarUV" \
+                -o APT::FTPArchive::Release::Suite="$distro" \
+                -o APT::FTPArchive::Release::Codename="$distro" \
+                -o APT::FTPArchive::Release::Architectures="amd64 arm64" \
+                -o APT::FTPArchive::Release::Components="main" \
+                release . > Release
+            )
+          done
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

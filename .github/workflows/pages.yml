@@ -2,7 +2,7 @@ name: Build and deploy apt repository
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
     paths:
       - 'pool/**'
       - '.github/workflows/pages.yml'
@@ -34,6 +34,8 @@ jobs:
           rm -rf public dists
           mkdir -p public
           cp -r pool public/pool
+          cp index.html public/index.html
+          echo "apt.polaruv.tech" > public/CNAME
           touch public/.nojekyll
 
           for distro_dir in pool/*/; do

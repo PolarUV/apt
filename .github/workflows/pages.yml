@@ -41,13 +41,11 @@ jobs:
             for arch in amd64 arm64; do
               dir="public/dists/$distro/main/binary-$arch"
               mkdir -p "$dir"
-              # пути в Packages указываются относительно public/
               (cd public && dpkg-scanpackages --arch "$arch" "pool/$distro" /dev/null \
                  > "dists/$distro/main/binary-$arch/Packages")
               gzip -9kf "public/dists/$distro/main/binary-$arch/Packages"
             done
 
-            # Release для дистрибутива
             (
               cd "public/dists/$distro"
               apt-ftparchive \
@@ -60,6 +58,34 @@ jobs:
                 release . > Release
             )
           done
+
+      - name: Import GPG key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          # Проверим, что импорт удался
+          gpg --list-secret-keys --keyid-format=long
+
+      - name: Sign Release files
+        run: |
+          set -euo pipefail
+          for d in public/dists/*/; do
+            # Release.gpg — detached, для старого формата "deb ... "
+            gpg --batch --yes --armor --detach-sign \
+              --output "$d/Release.gpg" "$d/Release"
+            # InRelease — clearsigned, для нового формата "deb [signed-by=...]"
+            gpg --batch --yes --clearsign \
+              --output "$d/InRelease" "$d/Release"
+          done
+
+      - name: Export public key
+        run: gpg --armor --export > public/pubkey.asc
+
+      - name: Show what we built
+        run: |
+          find public -maxdepth 4 -type f | sort
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
